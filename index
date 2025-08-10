@@ -1,0 +1,488 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Exploding Kittens Online</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<style>
+    body {
+        margin:0;
+        font-family: Arial, sans-serif;
+        background-color: #f9f6f1;
+        color: #222;
+        overflow:hidden;
+    }
+    header {
+        background: #ff4d4d;
+        color: white;
+        padding: 10px;
+        text-align: center;
+        font-size: 20px;
+    }
+    #lobby, #game {
+        display:none;
+        height:calc(100vh - 40px);
+        overflow:auto;
+        padding:10px;
+    }
+    .btn {
+        padding: 10px 15px;
+        margin: 5px;
+        background-color: #ff6666;
+        border: none;
+        color: white;
+        cursor: pointer;
+        border-radius:5px;
+        font-size: 14px;
+    }
+    .btn:hover {
+        background-color: #e05555;
+    }
+    input, select {
+        padding: 8px;
+        margin: 5px;
+        border-radius:4px;
+        border:1px solid #ccc;
+    }
+    #playerList {
+        margin-top:10px;
+        border:1px solid #ccc;
+        padding:5px;
+        background:white;
+        border-radius:4px;
+    }
+    #gameArea {
+        display:flex;
+        flex-direction: column;
+        align-items: center;
+    }
+    #drawPile, #discardPile {
+        width:100px;
+        height:140px;
+        border:2px solid #333;
+        border-radius:8px;
+        background:#eee;
+        display:flex;
+        align-items:center;
+        justify-content:center;
+        margin:10px;
+        cursor:pointer;
+    }
+    #log {
+        width:90%;
+        height:150px;
+        overflow-y:auto;
+        background:white;
+        border:1px solid #ccc;
+        margin-top:10px;
+        padding:5px;
+        font-size:12px;
+    }
+    #hand {
+        display:flex;
+        flex-wrap:wrap;
+        justify-content:center;
+        margin-top:20px;
+    }
+    .card {
+        width:100px;
+        height:140px;
+        border-radius:8px;
+        margin:5px;
+        background:white;
+        border:2px solid #000;
+        display:flex;
+        flex-direction: column;
+        align-items:center;
+        justify-content:center;
+        font-size:12px;
+        cursor:pointer;
+        box-shadow: 2px 2px 6px rgba(0,0,0,0.2);
+    }
+    .card-title {
+        font-weight:bold;
+        margin-bottom:5px;
+    }
+    .spectator {
+        background-color:#ddd;
+    }
+</style>
+</head>
+<body>
+<header>Exploding Kittens Online</header>
+
+<div id="lobby">
+    <h2>Lobby</h2>
+    <input id="playerName" placeholder="Your Name">
+    <div>
+        <button class="btn" onclick="createRoom()">Create Room</button>
+        <button class="btn" onclick="joinRoom()">Join Room</button>
+        <input id="roomCode" placeholder="Room Code">
+    </div>
+    <div>
+        <h3>Expansions</h3>
+        <label><input type="checkbox" id="exp_imploding"> Imploding Kittens</label><br>
+        <label><input type="checkbox" id="exp_streaking"> Streaking Kittens</label><br>
+        <label><input type="checkbox" id="exp_barking"> Barking Kittens</label><br>
+        <label><input type="checkbox" id="exp_zombie"> Zombie Kittens</label><br>
+        <label><input type="checkbox" id="exp_good"> Good vs Evil</label>
+    </div>
+    <div id="playerList"></div>
+</div>
+
+<div id="game">
+    <div id="gameArea">
+        <div style="display:flex; gap:20px;">
+            <div id="drawPile">Draw</div>
+            <div id="discardPile">Discard</div>
+        </div>
+        <div id="log"></div>
+        <div id="hand"></div>
+    </div>
+</div>
+
+<script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
+<script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-database.js"></script>
+<script>
+// ====== FIREBASE CONFIG (from your old index.html) ======
+var firebaseConfig = {
+    apiKey: "YOUR_API_KEY",
+    authDomain: "YOUR_PROJECT_ID.firebaseapp.com",
+    databaseURL: "https://YOUR_PROJECT_ID.firebaseio.com",
+    projectId: "YOUR_PROJECT_ID",
+    storageBucket: "YOUR_PROJECT_ID.appspot.com",
+    messagingSenderId: "YOUR_SENDER_ID",
+    appId: "YOUR_APP_ID"
+};
+firebase.initializeApp(firebaseConfig);
+const db = firebase.database();
+
+// ====== GLOBALS ======
+let playerName = "";
+let roomCode = "";
+let playerId = "";
+let isHost = false;
+let gameState = {};
+let myHand = [];
+
+// ====== UI FUNCTIONS ======
+function showLobby() {
+    document.getElementById('lobby').style.display = 'block';
+    document.getElementById('game').style.display = 'none';
+}
+function showGame() {
+    document.getElementById('lobby').style.display = 'none';
+    document.getElementById('game').style.display = 'block';
+}
+function logMessage(msg) {
+    const log = document.getElementById('log');
+    log.innerHTML += msg + "<br>";
+    log.scrollTop = log.scrollHeight;
+}
+
+// ====== ROOM FUNCTIONS ======
+function createRoom() {
+    playerName = document.getElementById('playerName').value.trim();
+    if (!playerName) return alert("Enter your name");
+    roomCode = Math.random().toString(36).substring(2, 6).toUpperCase();
+    isHost = true;
+    playerId = "p" + Date.now();
+    gameState = {
+        players: {},
+        host: playerId,
+        deck: [],
+        discard: [],
+        turnOrder: [],
+        currentTurn: 0,
+        expansions: {
+            imploding: document.getElementById('exp_imploding').checked,
+            streaking: document.getElementById('exp_streaking').checked,
+            barking: document.getElementById('exp_barking').checked,
+            zombie: document.getElementById('exp_zombie').checked,
+            good: document.getElementById('exp_good').checked
+        },
+        started: false
+    };
+    gameState.players[playerId] = {name: playerName, hand: [], alive: true, spectator: false};
+    gameState.turnOrder.push(playerId);
+    db.ref("rooms/" + roomCode).set(gameState);
+    joinRoomListener();
+    showLobby();
+    updatePlayerList();
+}
+
+function joinRoom() {
+    playerName = document.getElementById('playerName').value.trim();
+    roomCode = document.getElementById('roomCode').value.trim().toUpperCase();
+    if (!playerName || !roomCode) return alert("Enter your name and room code");
+    playerId = "p" + Date.now();
+    db.ref("rooms/" + roomCode + "/players/" + playerId).set({
+        name: playerName,
+        hand: [],
+        alive: true,
+        spectator: false
+    });
+    joinRoomListener();
+    showLobby();
+}
+
+function joinRoomListener() {
+    db.ref("rooms/" + roomCode).on("value", snap => {
+        if (!snap.exists()) return;
+        gameState = snap.val();
+        updatePlayerList();
+        if (gameState.started) {
+            showGame();
+            renderGame();
+        }
+    });
+}
+
+function updatePlayerList() {
+    let html = "<h3>Players</h3>";
+    for (let pid in gameState.players) {
+        let p = gameState.players[pid];
+        html += (p.spectator ? "<span class='spectator'>" : "") + p.name + (pid === gameState.host ? " (Host)" : "") + (p.spectator ? "</span>" : "") + "<br>";
+    }
+    if (isHost && !gameState.started) {
+        html += "<button class='btn' onclick='startGame()'>Start Game</button>";
+    }
+    document.getElementById('playerList').innerHTML = html;
+}
+
+// ====== GAME SETUP ======
+function startGame() {
+    // Build deck based on expansions
+    let deck = buildDeck();
+    // Shuffle
+    deck = shuffle(deck);
+    // Deal hands
+    for (let pid in gameState.players) {
+        if (!gameState.players[pid].spectator) {
+            gameState.players[pid].hand = [];
+            for (let i = 0; i < 7; i++) {
+                gameState.players[pid].hand.push(deck.pop());
+            }
+            // Give 1 Defuse
+            gameState.players[pid].hand.push({type: "Defuse"});
+        }
+    }
+    // Add Exploding Kittens (one fewer than players)
+    let numPlayers = Object.values(gameState.players).filter(p => !p.spectator).length;
+    for (let i = 0; i < numPlayers - 1; i++) deck.push({type: "Exploding Kitten"});
+    // Shuffle again
+    deck = shuffle(deck);
+    gameState.deck = deck;
+    gameState.discard = [];
+    gameState.currentTurn = 0;
+    gameState.started = true;
+    db.ref("rooms/" + roomCode).set(gameState);
+}
+
+// ====== DECK BUILDER ======
+function buildDeck() {
+    let cards = [];
+    // Base game cards
+    addCards(cards, "Attack", 4);
+    addCards(cards, "Skip", 4);
+    addCards(cards, "Shuffle", 4);
+    addCards(cards, "See the Future", 5);
+    addCards(cards, "Favor", 4);
+    addCards(cards, "Nope", 5);
+    addCards(cards, "Tacocat", 4);
+    addCards(cards, "Hairy Potato Cat", 4);
+    addCards(cards, "Beard Cat", 4);
+    addCards(cards, "Cattermelon", 4);
+    addCards(cards, "Rainbow Ralphing Cat", 4);
+    // Add expansions if enabled
+    if (gameState.expansions.imploding) addImploding(cards);
+    if (gameState.expansions.streaking) addStreaking(cards);
+    if (gameState.expansions.barking) addBarking(cards);
+    if (gameState.expansions.zombie) addZombie(cards);
+    if (gameState.expansions.good) addGood(cards);
+    return cards;
+}
+function addCards(deck, type, count) {
+    for (let i = 0; i < count; i++) deck.push({type});
+}
+function shuffle(array) {
+    for (let i = array.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [array[i], array[j]] = [array[j], array[i]];
+    }
+    return array;
+}
+
+// ====== RENDER HAND ======
+function renderGame() {
+    if (!gameState.players[playerId]) return;
+    myHand = gameState.players[playerId].hand;
+    const handDiv = document.getElementById('hand');
+    handDiv.innerHTML = "";
+    myHand.forEach((card, idx) => {
+        let c = document.createElement('div');
+        c.className = "card";
+        c.innerHTML = `<div class="card-title">${card.type}</div>`;
+        c.onclick = () => playCard(idx);
+        handDiv.appendChild(c);
+    });
+}
+
+// ====== PLAY CARD ======
+function playCard(index) {
+    let card = myHand[index];
+    if (!card) return;
+    // Example logic for base game cards
+    switch (card.type) {
+        case "Attack":
+            endTurn(true, 2);
+            break;
+        case "Skip":
+            endTurn(false);
+            break;
+        case "Shuffle":
+            gameState.deck = shuffle(gameState.deck);
+            logMessage(playerName + " shuffled the deck.");
+            break;
+        case "See the Future":
+            let top3 = gameState.deck.slice(-3).map(c => c.type).join(", ");
+            alert("Top 3 cards: " + top3);
+            break;
+        case "Favor":
+            alert("Favor: Ask a player for a card (not implemented in UI yet)");
+            break;
+        case "Nope":
+            // Handled as reaction (future expansion)
+            break;
+        default:
+            // Cat cards combo or expansion logic
+            handleSpecialCard(card);
+    }
+    // Discard card
+    myHand.splice(index, 1);
+    gameState.players[playerId].hand = myHand;
+    gameState.discard.push(card);
+    db.ref("rooms/" + roomCode).set(gameState);
+    renderGame();
+}
+
+// ====== HANDLE SPECIAL / EXPANSION CARDS ======
+function handleSpecialCard(card) {
+    switch (card.type) {
+        // Imploding Kittens
+        case "Reverse": reverseTurnOrder(); break;
+        case "Targeted Attack": targetedAttack(); break;
+        case "Alter the Future": alterFuture(3); break;
+        case "Draw from the Bottom": drawFromBottom(); break;
+        case "Feral Cat": alert("Feral Cat used as a wild combo card"); break;
+
+        // Streaking Kittens
+        case "Streaking Kitten": alert("You can hold an Exploding Kitten safely"); break;
+        case "See the Future 5x": alert(gameState.deck.slice(-5).map(c=>c.type).join(", ")); break;
+        case "Alter the Future 5x": alterFuture(5); break;
+        case "Super Skip": endTurn(false, true); break;
+        case "Swap Top and Bottom": swapTopBottom(); break;
+        case "Garbage Collection": garbageCollection(); break;
+        case "Catomic Bomb": catomicBomb(); break;
+        case "Curse of the Cat Butt": curseCatButt(); break;
+
+        // Barking Kittens
+        case "Barking Kitten": barkingKitten(); break;
+        case "Alter the Future Now": alterFutureNow(3); break;
+        case "Share the Future": shareFuture(); break;
+        case "Bury": buryCard(); break;
+        case "I’ll Take That": stealNextDraw(); break;
+        case "Personal Attack": endTurn(true, 3); break;
+        case "Potluck": potluck(); break;
+        case "Tower of Power": towerOfPower(); break;
+
+        // Zombie Kittens
+        case "Zombie Kitten": revivePlayer(); break;
+        case "Dig Deeper": digDeeper(); break;
+        case "Grave Robber": graveRobber(); break;
+        case "Clairvoyance": alert(gameState.deck.map(c=>c.type).join(", ")); break;
+        case "Clone": alert("Clone another card's effect"); break;
+        case "Attack of the Dead": alert("Zombie players attack!"); break;
+
+        // Good vs Evil
+        case "Godcat": godcat(); break;
+        case "Devilcat": devilcat(); break;
+        case "Armageddon": armageddon(); break;
+        case "Raising Heck": raisingHeck(); break;
+        case "Reveal the Future 3x": alert(gameState.deck.slice(-3).map(c=>c.type).join(", ")); break;
+        case "Mark": markPlayer(); break;
+    }
+}
+
+// ====== DRAW CARD ======
+document.getElementById('drawPile').onclick = () => {
+    drawCard();
+};
+
+function drawCard() {
+    if (gameState.currentTurnPlayer !== playerId) return;
+    if (gameState.deck.length === 0) {
+        alert("Deck empty! Shuffling discard.");
+        gameState.deck = shuffle(gameState.discard);
+        gameState.discard = [];
+    }
+    let card = gameState.deck.pop();
+    if (card.type === "Exploding Kitten") {
+        if (myHand.find(c => c.type === "Defuse")) {
+            alert("Exploding Kitten! You used a Defuse.");
+            myHand.splice(myHand.findIndex(c => c.type === "Defuse"), 1);
+            // Put EK back in random spot
+            let pos = Math.floor(Math.random() * (gameState.deck.length + 1));
+            gameState.deck.splice(pos, 0, {type: "Exploding Kitten"});
+        } else {
+            alert("BOOM! You exploded!");
+            gameState.players[playerId].alive = false;
+        }
+    } else {
+        myHand.push(card);
+    }
+    gameState.players[playerId].hand = myHand;
+    endTurn(false);
+    db.ref("rooms/" + roomCode).set(gameState);
+    renderGame();
+}
+
+// ====== TURN HANDLING ======
+function endTurn(attack=false, turns=1) {
+    // Advance turn order
+    if (attack) {
+        // Add extra turns to next player
+    }
+    gameState.currentTurn = (gameState.currentTurn + 1) % gameState.turnOrder.length;
+    gameState.currentTurnPlayer = gameState.turnOrder[gameState.currentTurn];
+    db.ref("rooms/" + roomCode).set(gameState);
+}
+
+// ====== PLACEHOLDER EXPANSION FUNCTIONS ======
+function reverseTurnOrder() { alert("Reverse order"); }
+function targetedAttack() { alert("Targeted attack"); }
+function alterFuture(n) { alert(`Alter top ${n} cards`); }
+function drawFromBottom() { alert("Draw from bottom"); }
+function swapTopBottom() { alert("Swap top and bottom"); }
+function garbageCollection() { alert("Garbage collection"); }
+function catomicBomb() { alert("Catomic bomb"); }
+function curseCatButt() { alert("Curse of the cat butt"); }
+function barkingKitten() { alert("Barking Kitten"); }
+function alterFutureNow(n) { alert(`Alter now top ${n} cards`); }
+function shareFuture() { alert("Share the future"); }
+function buryCard() { alert("Bury a card"); }
+function stealNextDraw() { alert("Steal next draw"); }
+function potluck() { alert("Potluck"); }
+function towerOfPower() { alert("Tower of Power"); }
+function revivePlayer() { alert("Revive player"); }
+function digDeeper() { alert("Dig deeper"); }
+function graveRobber() { alert("Grave robber"); }
+function godcat() { alert("Godcat"); }
+function devilcat() { alert("Devilcat"); }
+function armageddon() { alert("Armageddon"); }
+function raisingHeck() { alert("Raising heck"); }
+function markPlayer() { alert("Mark player"); }
+
+</script>
+</body>
+</html>
