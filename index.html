@@ -1,0 +1,646 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Exploding Kittens — Online (Single-File)</title>
+  <style>
+    :root{
+      --bg:#0f1222;--fg:#e8ecf1;--muted:#9aa3b2;--card:#141835;--accent:#8be9fd;--danger:#ff6b6b;--ok:#78e08f;--warn:#ffd166;
+      --shadow:0 12px 40px rgba(0,0,0,.35);
+    }
+    html,body{height:100%;margin:0;background:var(--bg);color:var(--fg);font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial}
+    .wrap{max-width:1100px;margin:0 auto;padding:18px}
+    h1{font-size:22px;margin:8px 0 14px;letter-spacing:.3px}
+    .row{display:flex;gap:12px;flex-wrap:wrap}
+    .card{background:linear-gradient(180deg,rgba(255,255,255,.06),rgba(255,255,255,.03));border:1px solid rgba(255,255,255,.08);border-radius:14px;box-shadow:var(--shadow)}
+    .panel{padding:14px}
+    input,button,select{background:#1b2147;border:1px solid rgba(255,255,255,.12);color:var(--fg);padding:8px 10px;border-radius:10px;outline:none}
+    button{cursor:pointer}
+    button.primary{background:#27307a;border-color:#4650c4}
+    button.danger{background:#5a1c1c;border-color:#aa3b3b}
+    .muted{color:var(--muted)}
+    .grid{display:grid;gap:10px}
+    .g2{grid-template-columns:repeat(2,minmax(0,1fr))}
+    .g3{grid-template-columns:repeat(3,minmax(0,1fr))}
+    .g4{grid-template-columns:repeat(4,minmax(0,1fr))}
+    /* Lobby */
+    #lobby{display:none}
+    #game{display:none}
+    .pill{padding:6px 10px;border-radius:999px;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.1)}
+    /* Cards */
+    .hand{display:flex;gap:10px;flex-wrap:wrap}
+    .ek-card{width:110px;height:160px;border-radius:14px;position:relative;background:var(--card);border:1px solid rgba(255,255,255,.14);box-shadow:0 8px 26px rgba(0,0,0,.35);cursor:pointer;transition:transform .12s ease}
+    .ek-card:hover{transform:translateY(-2px)}
+    .ek-card .title{position:absolute;left:10px;top:8px;font-weight:700;font-size:13px}
+    .ek-card .art{position:absolute;inset:0;display:grid;place-items:center;font-size:34px;opacity:.9}
+    .ek-card .desc{position:absolute;left:10px;right:10px;bottom:10px;font-size:11px;line-height:1.2;color:#c9d4f1}
+    .ek-card[type="Exploding Kitten"]{background:linear-gradient(160deg,#2a1020,#4a1730);border-color:#ff8aa6}
+    .ek-card[type="Defuse"]{background:linear-gradient(160deg,#0e2b26,#174439);border-color:#72f1b8}
+    .ek-card[type="Nope"]{background:linear-gradient(160deg,#2a162b,#3c2140);border-color:#ff9ced}
+    .ek-card[type="Attack"]{background:linear-gradient(160deg,#2a2010,#4a3717)}
+    .ek-card[type="Skip"]{background:linear-gradient(160deg,#1a2135,#27355a)}
+    .ek-card[type="Favor"]{background:linear-gradient(160deg,#21210f,#3b3b18)}
+    .ek-card[type="Shuffle"]{background:linear-gradient(160deg,#181818,#2a2a2a)}
+    .ek-card[type="See the Future"]{background:linear-gradient(160deg,#16282b,#1f3a40)}
+    .badge{display:inline-block;padding:2px 8px;border:1px solid rgba(255,255,255,.18);border-radius:999px;font-size:11px;opacity:.9}
+    .stack{display:flex;align-items:center;gap:8px}
+    .pile{width:120px;height:170px;border-radius:16px;border:2px dashed rgba(255,255,255,.2);display:grid;place-items:center}
+    .list{max-height:160px;overflow:auto}
+    .log{max-height:180px;overflow:auto;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.08);padding:8px;border-radius:10px}
+    .you{outline:2px solid var(--accent)}
+    .toast{position:fixed;right:16px;bottom:16px;background:#151a33;padding:10px 12px;border:1px solid rgba(255,255,255,.12);border-radius:12px;box-shadow:var(--shadow)}
+    dialog{border:none;border-radius:16px;background:#141835;color:#e8ecf1;padding:0;box-shadow:var(--shadow)}
+    dialog::backdrop{background:rgba(0,0,0,.6)}
+    .modal{padding:16px}
+    .actions{display:flex;gap:8px;justify-content:flex-end;margin-top:12px}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>Exploding Kittens — Online (Single-File)</h1>
+    <div class="row">
+      <!-- LOBBY -->
+      <div id="lobby" class="card panel" style="flex:1 1 360px">
+        <div class="grid g2">
+          <div class="grid">
+            <label>Name</label>
+            <input id="nameInput" placeholder="Your name"/>
+          </div>
+          <div class="grid">
+            <label>Room ID</label>
+            <input id="roomInput" placeholder="e.g. kittens-123"/>
+          </div>
+        </div>
+        <div class="row" style="align-items:center;gap:8px;margin-top:8px">
+          <div class="pill">Room: <b id="lobbyRoomLabel">-</b></div>
+          <button id="copyRoomBtn">Copy Code</button>
+        </div>
+        <div class="grid" style="margin-top:8px">
+          <label>Invite link</label>
+          <input id="shareLink" readonly/>
+          <div class="row" style="gap:8px;margin-top:6px">
+            <button id="copyLinkBtn">Copy Invite Link</button>
+          </div>
+        </div>
+        <div style="height:10px"></div>
+        <div class="row">
+          <button class="primary" id="createBtn">Create Room</button>
+          <button id="joinBtn">Join Room</button>
+        </div>
+        <div style="height:10px"></div>
+        <div class="muted">Tip: share the Room ID with friends. Everyone loads the same page and joins.</div>
+        <div style="height:14px"></div>
+        <div class="grid g2">
+          <div class="grid">
+            <div class="muted">Players</div>
+            <div id="playersList" class="list"></div>
+          </div>
+          <div class="grid">
+            <div class="muted">Controls</div>
+            <div class="row">
+              <button class="primary" id="startBtn" disabled>Start Game</button>
+              <button id="leaveBtn">Leave</button>
+            </div>
+            <div style="height:8px"></div>
+            <label><input type="checkbox" id="enableNope" checked/> Enable Nope</label>
+          </div>
+        </div>
+      </div>
+
+      <!-- GAME -->
+      <div id="game" class="card panel" style="flex:2 1 640px">
+        <div class="row" style="align-items:center;justify-content:space-between">
+          <div class="stack"><div class="pill">Room <b id="roomLabel">-</b></div><div class="pill">You: <b id="youLabel">-</b></div></div>
+          <div class="stack">
+            <div class="pill">Turn: <b id="turnLabel">-</b></div>
+            <div class="pill">Attacks: <b id="attackCount">0</b></div>
+            <div class="pill">Deck: <b id="deckCount">0</b></div>
+            <div class="pill">Discard: <b id="discardTop">-</b></div>
+          </div>
+        </div>
+        <div style="height:10px"></div>
+        <div class="row">
+          <div class="pile" style="position:relative">
+            <div>Draw Pile</div>
+            <button id="drawBtn" class="primary" style="position:absolute;bottom:10px">Draw</button>
+          </div>
+          <div class="pile"><div>Discard</div></div>
+          <div style="flex:1">
+            <div class="muted">Log</div>
+            <div id="log" class="log"></div>
+          </div>
+        </div>
+        <div style="height:8px"></div>
+        <div class="muted">Players</div>
+        <div id="tablePlayers" class="row"></div>
+        <div style="height:8px"></div>
+        <div class="muted">Your Hand</div>
+        <div id="hand" class="hand"></div>
+        <div style="height:8px"></div>
+        <div class="row">
+          <select id="targetSelect"></select>
+          <button id="nopeBtn" class="danger" disabled>Nope!</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODALS -->
+  <dialog id="modalSTF"><div class="modal">
+    <div style="font-weight:700;margin-bottom:8px">See the Future</div>
+    <div id="stfCards" class="row"></div>
+    <div class="actions"><button onclick="closeSTF()" class="primary">Close</button></div>
+  </div></dialog>
+
+  <dialog id="modalDefuse"><div class="modal">
+    <div style="font-weight:700;margin-bottom:8px">You drew an Exploding Kitten!</div>
+    <div>Play a Defuse? If yes, choose where to put the kitten back.</div>
+    <div class="actions">
+      <button onclick="resolveDefuse('top')" class="primary">Top</button>
+      <button onclick="resolveDefuse('bottom')" class="primary">Bottom</button>
+      <button onclick="resolveDefuse('random')" class="primary">Random</button>
+      <button onclick="resolveDefuse('no')" class="danger">No Defuse</button>
+    </div>
+  </div></dialog>
+
+  <div id="toast" class="toast" style="display:none"></div>
+
+  <!-- Inject your Firebase config (from your message) -->
+  <script>
+    window.__FIREBASE_CONFIG__ = {
+      apiKey: "AIzaSyAEqutXCO5OZD6VU_ohaBxNfh7G8Q6PEy0",
+      authDomain: "nomercy-8269a.firebaseapp.com",
+      databaseURL: "https://nomercy-8269a-default-rtdb.asia-southeast1.firebasedatabase.app",
+      projectId: "nomercy-8269a",
+      storageBucket: "nomercy-8269a.firebasestorage.app",
+      messagingSenderId: "349047620790",
+      appId: "1:349047620790:web:3206ff81cb7f5413d29217",
+      measurementId: "G-1WX7CWBFGF"
+    };
+  </script>
+
+  <!-- Firebase & game logic -->
+  <script type="module">
+    // Firebase CDN modules
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js";
+    import { getDatabase, ref, get, set, update, onValue, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-database.js";
+
+    // --- Validate config + init
+    const cfg = window.__FIREBASE_CONFIG__;
+    const VALID_DB_RE = /^https:\/\/[^\/\s]+(?:\.firebaseio\.com|\.firebasedatabase\.app)(?:\/.*)?$/i;
+    const urlOk = VALID_DB_RE.test(cfg?.databaseURL || "");
+    if (!cfg || !urlOk) {
+      alert("Firebase config missing/invalid. Check databaseURL.");
+      throw new Error("Invalid Firebase config");
+    }
+    const app = initializeApp(cfg);
+    const db  = getDatabase(app, cfg.databaseURL);
+
+    // ======== STATE ========
+    const $ = (sel)=>document.querySelector(sel);
+    const lobbyEl = $('#lobby');
+    const gameEl = $('#game');
+    const logEl = $('#log');
+    const playersListEl = $('#playersList');
+    const tablePlayersEl = $('#tablePlayers');
+    const handEl = $('#hand');
+    const targetSel = $('#targetSelect');
+    const nopeBtn = $('#nopeBtn');
+    const drawBtn = $('#drawBtn');
+    const roomLabel = $('#roomLabel');
+    const youLabel = $('#youLabel');
+    const turnLabel = $('#turnLabel');
+    const deckCountLabel = $('#deckCount');
+    const discardTopLabel = $('#discardTop');
+    const attackCountLabel = $('#attackCount');
+    const lobbyRoomLabel = document.getElementById('lobbyRoomLabel');
+    const shareLinkInput = document.getElementById('shareLink');
+    const copyRoomBtn = document.getElementById('copyRoomBtn');
+    const copyLinkBtn = document.getElementById('copyLinkBtn');
+
+    let me = null;
+    let roomId = null;
+    let room = null;
+    let unsubRoom = null;
+
+    // Helpers
+    function id(){return Math.random().toString(36).slice(2,10)}
+    function toast(msg){ const t = $('#toast'); t.textContent = msg; t.style.display='block'; setTimeout(()=>t.style.display='none', 2200); }
+    function log(msg){ const line = document.createElement('div'); line.textContent = msg; logEl.appendChild(line); logEl.scrollTop = logEl.scrollHeight; }
+
+    // Cards
+    const TYPES = ['Exploding Kitten','Defuse','Nope','Attack','Skip','Favor','Shuffle','See the Future'];
+    function makeDeck(playerCount){
+      const deck=[]; const add=(t,n)=>{for(let i=0;i<n;i++) deck.push({id:id(),type:t});};
+      add('Attack',4); add('Skip',4); add('Favor',4); add('Shuffle',4); add('See the Future',5); add('Nope',5);
+      for(let i=0;i<Math.max(1,playerCount-1);i++) deck.push({id:id(),type:'Exploding Kitten'});
+      add('Defuse', Math.max(0,6-playerCount));
+      return deck;
+    }
+    function shuffle(array){ for(let i=array.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[array[i],array[j]]=[array[j]],array[i]} return array; }
+    function cardEmoji(t){
+      switch(t){
+        case 'Exploding Kitten': return '💥🐱'; case 'Defuse': return '🧯'; case 'Nope': return '🚫'; case 'Attack': return '⚔️';
+        case 'Skip': return '⏭️'; case 'Favor': return '🎁'; case 'Shuffle': return '🔀'; case 'See the Future': return '🔮';
+        default: return '🎴';
+      }
+    }
+
+    function render(){
+      if(!room) return;
+      const inLobby = room.phase === 'lobby';
+      lobbyEl.style.display = inLobby ? 'block' : 'none';
+      gameEl.style.display = inLobby ? 'none' : 'block';
+      $('#startBtn').disabled = !(isHost() && (Object.keys(room.players||{}).length>=2));
+
+      roomLabel.textContent = room.id;
+      youLabel.textContent = me?.name||'-';
+      turnLabel.textContent = currentPlayer()?.name || '-';
+      deckCountLabel.textContent = (room.deck?.length||0);
+      discardTopLabel.textContent = room.discard?.[room.discard.length-1]?.type || '-';
+      attackCountLabel.textContent = room.pendingAttacks || 0;
+
+      // Show room code + share link in lobby
+      if(lobbyRoomLabel) lobbyRoomLabel.textContent = room.id || '-';
+      if(shareLinkInput){
+        const origin = location.origin || '';
+        const path = location.pathname || '';
+        const nm = encodeURIComponent(me?.name||'');
+        shareLinkInput.value = `${origin}${path}#${room.id}:${nm}`;
+      }
+
+      playersListEl.innerHTML = '';
+      Object.values(room.players||{}).forEach(p=>{
+        const d=document.createElement('div'); d.className='pill';
+        d.textContent = p.name + (p.id===room.hostId?' (host)':'');
+        playersListEl.appendChild(d);
+      });
+
+      tablePlayersEl.innerHTML='';
+      const aliveOrder = seatingOrder();
+      aliveOrder.forEach(pid=>{
+        const p = room.players[pid];
+        const d = document.createElement('div');
+        d.className='card panel'; d.style.minWidth='160px';
+        if(p.id===me.id) d.classList.add('you');
+        d.innerHTML = `<div style="font-weight:700">${p.name}${p.dead?' ☠️':''}</div>
+          <div class="muted">Cards: ${p.hand?.length||0}</div>`;
+        tablePlayersEl.appendChild(d);
+      });
+
+      targetSel.innerHTML='';
+      aliveOrder.filter(pid=>pid!==me.id).forEach(pid=>{
+        const p=room.players[pid];
+        const opt=document.createElement('option'); opt.value=pid; opt.textContent=p.name;
+        targetSel.appendChild(opt);
+      });
+
+      if(room.players[me.id]){
+        handEl.innerHTML='';
+        (room.players[me.id].hand||[]).forEach(c=>{
+          const card = document.createElement('div'); card.className='ek-card'; card.setAttribute('type', c.type);
+          card.innerHTML = `<div class="title">${c.type}</div>
+            <div class="art">${cardEmoji(c.type)}</div>
+            <div class="desc">Click to play.</div>`;
+          card.onclick=()=>playCard(c);
+          handEl.appendChild(card);
+        });
+      }
+
+      drawBtn.disabled = !(isMyTurn() && !room.awaitingNope && !room.defusePrompt && !room.stfPrompt);
+      nopeBtn.disabled = !(room.awaitingNope && room.awaitingNope.deadline > Date.now() && me.id!==room.turn);
+    }
+
+    function seatingOrder(){ const ids = Object.keys(room.players||{}).filter(pid=>!room.players[pid].dead); return ids.sort((a,b)=> (room.players[a].createdAt||0) - (room.players[b].createdAt||0)); }
+    function currentPlayer(){ return room && room.players && room.players[room.turn]; }
+    function isMyTurn(){ return room?.turn === me?.id; }
+    function isHost(){ return me && room && room.hostId===me.id; }
+
+    // Firebase room sync
+    async function createRoom(){
+      const name = $('#nameInput').value.trim() || `Player-${id().slice(0,4)}`;
+      const r = $('#roomInput').value.trim() || `kittens-${id().slice(0,4)}`;
+      me = {id:id(), name}; roomId = r;
+      const roomRef = ref(db, `ek/${r}`);
+      const snap = await get(roomRef);
+      if(snap.exists()) throw new Error('Room already exists. Pick another ID or Join.');
+      const now = Date.now();
+      const initial = {
+        id:r, hostId: me.id, phase:'lobby', createdAt: serverTimestamp(),
+        players: {[me.id]:{id:me.id,name,createdAt:now,hand:[],dead:false}},
+        deck:[], discard:[], turn:null, pendingAttacks:0, awaitingNope:null, defusePrompt:null, stfPrompt:null
+      };
+      await set(roomRef, initial);
+      // reflect code in UI + URL for easy sharing
+      if(lobbyRoomLabel) lobbyRoomLabel.textContent = r;
+      const origin = location.origin || '';
+      const path = location.pathname || '';
+      location.hash = `${r}:${encodeURIComponent(name)}`;
+      if(shareLinkInput) shareLinkInput.value = `${origin}${path}#${r}:${encodeURIComponent(name)}`;
+      log(`Created room ${r}`);
+      subscribeRoom(r);
+    }
+
+    async function joinRoom(){
+      const name = $('#nameInput').value.trim() || `Player-${id().slice(0,4)}`;
+      const r = $('#roomInput').value.trim();
+      if(!r) return toast('Enter a Room ID');
+      me = {id:id(), name}; roomId = r;
+      const roomRef = ref(db, `ek/${r}`); const snap = await get(roomRef);
+      if(!snap.exists()) throw new Error('Room not found.');
+      const now = Date.now();
+      await update(roomRef, {[`players/${me.id}`]:{id:me.id,name,createdAt:now,hand:[],dead:false}});
+      log(`Joined room ${r}`); subscribeRoom(r);
+    }
+
+    function subscribeRoom(r){
+      if(unsubRoom) unsubRoom();
+      const roomRef = ref(db, `ek/${r}`);
+      const off = onValue(roomRef, s=>{ room = s.val(); render(); });
+      unsubRoom = off;
+      lobbyEl.style.display='block';
+    }
+
+    async function leaveRoom(){
+      if(!roomId||!me) return; const roomRef = ref(db, `ek/${roomId}`);
+      await update(roomRef, {[`players/${me.id}`]: null});
+      if(room && room.hostId===me.id){ await update(roomRef, {hostId: Object.keys(room.players||{}).find(pid=>pid!==me.id)||null}); }
+      me=null; roomId=null; room=null; render();
+    }
+
+    // Start game (host)
+    async function startGame(){
+      if(!isHost()) return;
+      const ids = seatingOrder();
+      if(ids.length<2) return toast('Need 2+ players');
+      let deck = makeDeck(ids.length);
+      shuffle(deck);
+      const players = {...room.players};
+      for(const pid of ids){
+        const hand = [];
+        hand.push({id:id(), type:'Defuse'});
+        for(let i=0;i<4;i++){ hand.push(deck.pop()); }
+        players[pid].hand = hand;
+      }
+      shuffle(deck);
+      await update(ref(db, `ek/${room.id}`), {
+        phase:'playing', deck, discard:[], players, turn: ids[0], pendingAttacks:0,
+        awaitingNope:null, defusePrompt:null, stfPrompt:null, enableNope: $('#enableNope').checked
+      });
+      log('Game started');
+    }
+
+    // Draw action
+    async function drawCard(){
+      if(!isMyTurn()||room.awaitingNope||room.defusePrompt||room.stfPrompt) return;
+      const deck=[...(room.deck||[])];
+      if(deck.length===0) return toast('Deck empty');
+      const card = deck.pop();
+      const my = {...room.players[me.id]};
+      const players={...room.players};
+      const discard=[...(room.discard||[])];
+
+      if(card.type==='Exploding Kitten'){
+        const hasDefuse = my.hand.some(c=>c.type==='Defuse');
+        if(!hasDefuse){
+          players[me.id].dead = true;
+          log(`${my.name} exploded! ☠️`);
+          const next = nextTurnAfter(me.id);
+          await update(ref(db,`ek/${room.id}`),{deck,players,discard,turn:next});
+          checkWin();
+          return;
+        } else {
+          await update(ref(db,`ek/${room.id}`),{deck, defusePrompt:{pid:me.id, card}});
+          openDefuse();
+          return;
+        }
+      }
+
+      my.hand = [...my.hand, card]; players[me.id]=my;
+      let pending = room.pendingAttacks||0;
+      let newTurn = room.turn;
+      if(pending>0){ pending -= 1; }
+      else { newTurn = nextTurnAfter(me.id); }
+
+      await update(ref(db,`ek/${room.id}`),{deck,players,discard,turn:newTurn,pendingAttacks:pending});
+      if(newTurn!==me.id) log(`${my.name} drew a card.`);
+    }
+
+    function nextTurnAfter(pid){
+      const order = seatingOrder();
+      const i = order.indexOf(pid);
+      const next = order[(i+1)%order.length];
+      return next;
+    }
+
+    // Play a card from hand
+    async function playCard(card){
+      if(!isMyTurn()||room.awaitingNope||room.defusePrompt||room.stfPrompt) return;
+      const my = {...room.players[me.id]};
+      if(!my.hand.find(c=>c.id===card.id)) return;
+      if(card.type==='Exploding Kitten') return toast('You cannot play an Exploding Kitten from hand.');
+
+      const players={...room.players};
+      const discard=[...(room.discard||[])];
+      my.hand = my.hand.filter(c=>c.id!==card.id);
+      players[me.id]=my; discard.push(card);
+
+      const action = { id:id(), by:me.id, type:card.type, ts:Date.now(), target:null };
+
+      switch(card.type){
+        case 'Skip': {
+          let pending = room.pendingAttacks||0;
+          if(pending>0) pending -= 1;
+          const turn = pending>0 ? me.id : nextTurnAfter(me.id);
+          await update(ref(db,`ek/${room.id}`), {players, discard, awaitingNope: startNope(action), pendingAttacks: pending, turn});
+          break;
+        }
+        case 'Attack': {
+          const pending = (room.pendingAttacks||0) + 2;
+          const turn = nextTurnAfter(me.id);
+          await update(ref(db,`ek/${room.id}`), {players, discard, awaitingNope: startNope(action), pendingAttacks: pending, turn});
+          break;
+        }
+        case 'Favor': {
+          const tgt = targetSel.value || nextTurnAfter(me.id);
+          action.target=tgt;
+          await update(ref(db,`ek/${room.id}`), {players, discard, awaitingNope: startNope(action)});
+          break;
+        }
+        case 'Shuffle': {
+          await update(ref(db,`ek/${room.id}`), {players, discard, awaitingNope: startNope(action)});
+          break;
+        }
+        case 'See the Future': {
+          await update(ref(db,`ek/${room.id}`), {players, discard, awaitingNope: startNope(action)});
+          break;
+        }
+        case 'Nope': {
+          if(!room.awaitingNope) return toast('Nothing to nope.');
+          await handleNope();
+          return;
+        }
+        case 'Defuse': return toast('You can only use Defuse when you draw an Exploding Kitten.');
+        default: return;
+      }
+      log(`${room.players[me.id].name} played ${card.type}.`);
+    }
+
+    function startNope(action){
+      if(room.enableNope===false) return null;
+      return {action, deadline: Date.now()+4500, nopeCount:0};
+    }
+
+    async function handleNope(){
+      if(!room.awaitingNope) return;
+      const an = {...room.awaitingNope};
+      an.nopeCount = (an.nopeCount||0)+1;
+      an.deadline = Date.now()+2000;
+      await update(ref(db,`ek/${room.id}`), {awaitingNope: an});
+      log(`${room.players[me.id].name} said NOPE! (#${an.nopeCount})`);
+    }
+
+    setInterval(async ()=>{
+      if(!room || !room.awaitingNope) return;
+      if(room.awaitingNope.deadline <= Date.now()){
+        const {action, nopeCount} = room.awaitingNope;
+        await applyAction(action, (nopeCount||0)%2===1);
+      }
+      render();
+    }, 500);
+
+    async function applyAction(action, canceled){
+      const players={...room.players};
+      const deck=[...(room.deck||[])];
+      const discard=[...(room.discard||[])];
+      let turn = room.turn; let pending = room.pendingAttacks||0;
+      if(canceled){ log(`Action ${action.type} was noped.`); await update(ref(db,`ek/${room.id}`), {awaitingNope:null}); return; }
+
+      switch(action.type){
+        case 'Skip': {
+          await update(ref(db,`ek/${room.id}`), {players, deck, discard, awaitingNope:null, pendingAttacks: pending, turn});
+          break;
+        }
+        case 'Attack': {
+          await update(ref(db,`ek/${room.id}`), {players, deck, discard, awaitingNope:null, pendingAttacks: pending, turn});
+          break;
+        }
+        case 'Favor': {
+          const tgt = players[action.target];
+          if(tgt && tgt.hand && tgt.hand.length>0){
+            const idx = Math.floor(Math.random()*tgt.hand.length);
+            const [card] = tgt.hand.splice(idx,1);
+            players[action.by].hand.push(card);
+            log(`${players[action.by].name} received a random card from ${tgt.name}.`);
+          } else {
+            log(`Favor fizzled — target had no cards.`);
+          }
+          await update(ref(db,`ek/${room.id}`), {players, awaitingNope:null});
+          break;
+        }
+        case 'Shuffle': {
+          shuffle(deck);
+          log(`Deck shuffled.`);
+          await update(ref(db,`ek/${room.id}`), {deck, awaitingNope:null});
+          break;
+        }
+        case 'See the Future': {
+          const top3 = deck.slice(-3);
+          await update(ref(db,`ek/${room.id}`), {stfPrompt:{pid:action.by, top3}, awaitingNope:null});
+          if(me.id===action.by) openSTF(top3);
+          break;
+        }
+        default: {
+          await update(ref(db,`ek/${room.id}`), {awaitingNope:null});
+        }
+      }
+    }
+
+    // Modals — expose globally so inline onclick works under modules
+    function openSTF(){ $('#modalSTF').showModal(); renderSTF(); }
+    function renderSTF(){
+      const m = room?.stfPrompt; if(!m||m.pid!==me?.id) return;
+      const c = $('#stfCards'); c.innerHTML='';
+      (m.top3||[]).forEach(k=>{
+        const d=document.createElement('div'); d.className='ek-card'; d.setAttribute('type',k.type);
+        d.innerHTML = `<div class="title">${k.type}</div><div class="art">${cardEmoji(k.type)}</div>`;
+        c.appendChild(d);
+      });
+    }
+    window.closeSTF = async function(){ $('#modalSTF').close(); await update(ref(db,`ek/${room.id}`), {stfPrompt:null}); };
+
+    function openDefuse(){ if(me?.id===room?.defusePrompt?.pid) $('#modalDefuse').showModal(); }
+    window.resolveDefuse = async function(where){
+      $('#modalDefuse').close();
+      const defCardIndex = room.players[me.id].hand.findIndex(c=>c.type==='Defuse');
+      const players={...room.players}; const deck=[...(room.deck||[])];
+      if(where==='no' || defCardIndex===-1){
+        players[me.id].dead=true; log(`${players[me.id].name} exploded! ☠️`);
+      } else {
+        const my = {...players[me.id]};
+        my.hand = my.hand.filter((_,i)=>i!==defCardIndex);
+        players[me.id]=my;
+        const kitten = room.defusePrompt.card;
+        if(where==='top') deck.push(kitten);
+        else if(where==='bottom') deck.unshift(kitten);
+        else { const pos=Math.floor(Math.random()*(deck.length+1)); deck.splice(pos,0,kitten); }
+        log(`${players[me.id].name} defused the kitten.`);
+      }
+      const next = players[me.id].dead ? nextTurnAfter(me.id) : room.turn;
+      await update(ref(db,`ek/${room.id}`), {players, deck, defusePrompt:null, turn:next});
+      checkWin();
+    };
+
+    async function checkWin(){
+      const alive = seatingOrder();
+      if(alive.length===1){
+        log(`${room.players[alive[0]].name} wins! 🎉`);
+        await update(ref(db,`ek/${room.id}`), {phase:'finished'});
+      }
+    }
+
+    // Wire UI
+    $('#createBtn').onclick = ()=>createRoom().catch(e=>toast(e.message));
+    $('#joinBtn').onclick   = ()=>joinRoom().catch(e=>toast(e.message));
+    $('#leaveBtn').onclick  = ()=>leaveRoom();
+    $('#startBtn').onclick  = ()=>startGame();
+    drawBtn.onclick         = ()=>drawCard();
+    nopeBtn.onclick         = ()=>handleNope();
+    if(copyRoomBtn){ copyRoomBtn.onclick = async ()=>{ try{ await navigator.clipboard.writeText(room?.id || roomId || ''); toast('Room code copied'); }catch{ toast('Copy failed'); } } }
+    if(copyLinkBtn){ copyLinkBtn.onclick = async ()=>{ try{ await navigator.clipboard.writeText(shareLinkInput?.value || ''); toast('Invite link copied'); }catch{ toast('Copy failed'); } } }
+
+    // Show lobby on load
+    lobbyEl.style.display='block';
+
+    // URL hash autofill: #roomId:YourName
+    const hash = decodeURIComponent(location.hash.slice(1));
+    if(hash){
+      const [r,n] = hash.split(':'); if(r) $('#roomInput').value=r; if(n) $('#nameInput').value=n;
+    }
+
+    // Render loop
+    setInterval(()=>render(),300);
+
+    // --- Quick self-tests (dev aids)
+    (function devTests(){
+      const cases = [
+        'https://myproj.firebaseio.com',
+        'https://myproj-default-rtdb.asia-southeast1.firebasedatabase.app',
+        'http://insecure.firebaseio.com',
+        'https://notfirebase.example.com',
+        'https://firebaseio.com',
+      ];
+      console.log('[TEST] Provided databaseURL valid ->', VALID_DB_RE.test(cfg.databaseURL));
+      cases.forEach(u=>console.log('[TEST] URL', u, '->', VALID_DB_RE.test(u)));
+      for(let p=2;p<=5;p++){
+        const d = makeDeck(p);
+        const count = t => d.filter(c=>c.type===t).length;
+        console.log(`[TEST] p=${p} EK=${count('Exploding Kitten')} (expect ${Math.max(1,p-1)})`, 'DEFUSE=', count('Defuse'));
+      }
+      console.log('[TEST] room code element exists ->', !!document.getElementById('lobbyRoomLabel'));
+      console.log('[TEST] share link input exists ->', !!document.getElementById('shareLink'));
+    })();
+  </script>
+</body>
+</html>
