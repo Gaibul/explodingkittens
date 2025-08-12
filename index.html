@@ -43,6 +43,12 @@
     .ek-card[type="Favor"]{background:linear-gradient(160deg,#21210f,#3b3b18)}
     .ek-card[type="Shuffle"]{background:linear-gradient(160deg,#181818,#2a2a2a)}
     .ek-card[type="See the Future"]{background:linear-gradient(160deg,#16282b,#1f3a40)}
+    .ek-card[type="See the Future (5)"]{background:linear-gradient(160deg,#10333d,#16505e)}
+    .ek-card[type="Alter the Future"]{background:linear-gradient(160deg,#1f223e,#2a3d74)}
+    .ek-card[type="Draw From the Bottom"]{background:linear-gradient(160deg,#1e1a2b,#2a1f3d)}
+    .ek-card[type="Reverse"]{background:linear-gradient(160deg,#1f2a1a,#2f4a2a)}
+    .ek-card[type="Targeted Attack"]{background:linear-gradient(160deg,#2a211a,#4a372a)}
+    .ek-card[type="Super Skip"]{background:linear-gradient(160deg,#15253e,#1d3b66)}
     .badge{display:inline-block;padding:2px 8px;border:1px solid rgba(255,255,255,.18);border-radius:999px;font-size:11px;opacity:.9}
     .stack{display:flex;align-items:center;gap:8px}
     .pile{width:120px;height:170px;border-radius:16px;border:2px dashed rgba(255,255,255,.2);display:grid;place-items:center}
@@ -105,6 +111,13 @@
             <div style="height:8px"></div>
             <label style="display:block;margin-bottom:6px"><input type="checkbox" id="enableNope" checked/> Enable Nope</label>
             <label style="display:block"><input type="checkbox" id="soloStart" checked/> Allow solo start (testing)</label>
+            <div style="height:8px"></div>
+            <div class="muted">Expansion packs</div>
+            <label style="display:block"><input type="checkbox" id="packImploding"/> Use Imploding Pack</label>
+            <label style="display:block"><input type="checkbox" id="packStreaking"/> Use Streaking Pack</label>
+            <div class="row" style="gap:8px;margin-top:8px">
+              <button id="rulesBtn">Rules / Cheat Sheet</button>
+            </div>
           </div>
         </div>
       </div>
@@ -149,9 +162,12 @@
 
   <!-- MODALS -->
   <dialog id="modalSTF"><div class="modal">
-    <div style="font-weight:700;margin-bottom:8px">See the Future</div>
+    <div style="font-weight:700;margin-bottom:8px">Peek / Alter the Future</div>
     <div id="stfCards" class="row"></div>
-    <div class="actions"><button onclick="closeSTF()" class="primary">Close</button></div>
+    <div class="actions">
+      <button id="applySTFBtn" class="primary" style="display:none" onclick="applySTF()">Apply Order</button>
+      <button onclick="closeSTF()" class="primary">Close</button>
+    </div>
   </div></dialog>
 
   <dialog id="modalDefuse"><div class="modal">
@@ -163,6 +179,36 @@
       <button onclick="resolveDefuse('random')" class="primary">Random</button>
       <button onclick="resolveDefuse('no')" class="danger">No Defuse</button>
     </div>
+  </div></dialog>
+
+  <dialog id="modalRules"><div class="modal">
+    <div style="font-weight:700;margin-bottom:8px">Quick Rules Cheat Sheet</div>
+    <div class="grid">
+      <div><b>Goal</b>: be the last player alive. If you draw an <i>Exploding Kitten</i> without a <i>Defuse</i>, you explode.</div>
+      <div><b>Turn</b>: (1) Play any number of cards. (2) End by drawing once (unless an action says otherwise).</div>
+      <div><b>Core cards</b>:
+        <ul>
+          <li><b>Attack</b>: End your turn; next player takes 2 turns.</li>
+          <li><b>Skip</b>: End your turn without drawing. If you owe extra draws (from Attacks), Skip consumes one.</li>
+          <li><b>Favor</b>: Target gives you 1 random card.</li>
+          <li><b>Shuffle</b>: Shuffle the deck.</li>
+          <li><b>See the Future</b>: Peek at the top 3.</li>
+          <li><b>Nope</b>: Cancel a card action (another Nope re-enables it).</li>
+        </ul>
+      </div>
+      <div><b>Expansion cards (implemented here)</b>:
+        <ul>
+          <li><b>Reverse</b> (Imploding): Flip play direction. If you owe draws, it also consumes one.</li>
+          <li><b>Targeted Attack</b> (Imploding): Choose a player; they take 2 turns.</li>
+          <li><b>Draw From the Bottom</b> (Imploding): Draw the bottom card instead of the top.</li>
+          <li><b>Alter the Future</b> (Imploding): Look at top 3 and reorder them.</li>
+          <li><b>Super Skip</b> (Streaking): End your turn and clear all owed draws.</li>
+          <li><b>See the Future (5)</b> (Streaking): Peek at the top 5.</li>
+        </ul>
+      </div>
+      <div class="muted">Note: Some expansion quirks (e.g., Streaking Kitten/Imploding Kitten special rules) are not included yet to keep games fast. Happy to add them if you want the full set.</div>
+    </div>
+    <div class="actions"><button onclick="document.getElementById('modalRules').close()" class="primary">Close</button></div>
   </div></dialog>
 
   <div id="toast" class="toast" style="display:none"></div>
@@ -219,11 +265,16 @@
     const shareLinkInput = document.getElementById('shareLink');
     const copyRoomBtn = document.getElementById('copyRoomBtn');
     const copyLinkBtn = document.getElementById('copyLinkBtn');
+    const packImploding = document.getElementById('packImploding');
+    const packStreaking = document.getElementById('packStreaking');
+    const rulesBtn = document.getElementById('rulesBtn');
+    const applySTFBtn = document.getElementById('applySTFBtn');
 
     let me = null;
     let roomId = null;
     let room = null;
     let unsubRoom = null;
+    let stfLocal = null; // {list: Card[], reorder: boolean}
 
     // Helpers
     function id(){return Math.random().toString(36).slice(2,10)}
@@ -231,12 +282,17 @@
     function log(msg){ const line = document.createElement('div'); line.textContent = msg; logEl.appendChild(line); logEl.scrollTop = logEl.scrollHeight; }
 
     // Cards
-    const TYPES = ['Exploding Kitten','Defuse','Nope','Attack','Skip','Favor','Shuffle','See the Future'];
-    function makeDeck(playerCount){
+    const TYPES = ['Exploding Kitten','Defuse','Nope','Attack','Skip','Favor','Shuffle','See the Future','Reverse','Targeted Attack','Draw From the Bottom','Alter the Future','Super Skip','See the Future (5)'];
+    function makeDeck(playerCount, packs={}){
       const deck=[]; const add=(t,n)=>{for(let i=0;i<n;i++) deck.push({id:id(),type:t});};
+      // Base
       add('Attack',4); add('Skip',4); add('Favor',4); add('Shuffle',4); add('See the Future',5); add('Nope',5);
       for(let i=0;i<Math.max(1,playerCount-1);i++) deck.push({id:id(),type:'Exploding Kitten'});
       add('Defuse', Math.max(0,6-playerCount));
+      // Imploding pack (subset implemented)
+      if(packs.imploding){ add('Reverse',4); add('Targeted Attack',2); add('Alter the Future',2); add('Draw From the Bottom',2); }
+      // Streaking pack (subset implemented)
+      if(packs.streaking){ add('Super Skip',2); add('See the Future (5)',2); }
       return deck;
     }
     function shuffle(array){ for(let i=array.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[array[i], array[j]] = [array[j], array[i]]} return array; }
@@ -244,6 +300,8 @@
       switch(t){
         case 'Exploding Kitten': return '💥🐱'; case 'Defuse': return '🧯'; case 'Nope': return '🚫'; case 'Attack': return '⚔️';
         case 'Skip': return '⏭️'; case 'Favor': return '🎁'; case 'Shuffle': return '🔀'; case 'See the Future': return '🔮';
+        case 'Reverse': return '↩️'; case 'Targeted Attack': return '🎯'; case 'Draw From the Bottom': return '⬇️📦';
+        case 'Alter the Future': return '🛠️🔮'; case 'Super Skip': return '⏩'; case 'See the Future (5)': return '🔮5';
         default: return '🎴';
       }
     }
@@ -270,6 +328,9 @@
         const nm = encodeURIComponent(me?.name||'');
         shareLinkInput.value = `${origin}${path}#${room.id}:${nm}`;
       }
+      // Packs UI reflect room settings
+      if(packImploding){ packImploding.checked = !!room.packs?.imploding; packImploding.disabled = !isHost() || room.phase!=='lobby'; }
+      if(packStreaking){ packStreaking.checked = !!room.packs?.streaking; packStreaking.disabled = !isHost() || room.phase!=='lobby'; }
 
       playersListEl.innerHTML = '';
       Object.values(room.players||{}).forEach(p=>{
@@ -318,6 +379,14 @@
     function isMyTurn(){ return room?.turn === me?.id; }
     function isHost(){ return me && room && room.hostId===me.id; }
 
+    function nextTurnAfter(pid, dir){
+      const order = seatingOrder(); if(order.length===0) return pid;
+      const d = (dir!==undefined?dir:(room?.direction||1));
+      const i = order.indexOf(pid);
+      const next = order[(i + d + order.length) % order.length];
+      return next;
+    }
+
     // Firebase room sync
     async function createRoom(){
       const name = $('#nameInput').value.trim() || `Player-${id().slice(0,4)}`;
@@ -328,7 +397,8 @@
       if(snap.exists()) throw new Error('Room already exists. Pick another ID or Join.');
       const now = Date.now();
       const initial = {
-        id:r, hostId: me.id, phase:'lobby', createdAt: serverTimestamp(),
+        id:r, hostId: me.id, phase:'lobby', createdAt: serverTimestamp(), direction: 1,
+        packs: { imploding: !!packImploding?.checked, streaking: !!packStreaking?.checked },
         players: {[me.id]:{id:me.id,name,createdAt:now,hand:[],dead:false}},
         deck:[], discard:[], turn:null, pendingAttacks:0, awaitingNope:null, defusePrompt:null, stfPrompt:null
       };
@@ -377,12 +447,8 @@
       const soloOK = document.getElementById('soloStart')?.checked;
       if(ids.length<2 && !soloOK) return toast('Need 2+ players');
 
-      // Build a full deck, then follow official setup order:
-      // 1) Remove all Exploding Kittens
-      // 2) Remove all Defuse, deal 1 to each player, put extras back into deck
-      // 3) Deal starting hand (we use 4 extra cards here for our smaller deck)
-      // 4) Insert EKs = players-1 back into the deck and shuffle
-      const full = makeDeck(ids.length || 1);
+      // Build a full deck, then follow official setup order
+      const full = makeDeck(ids.length || 1, room.packs||{});
       const ekPool = full.filter(c=>c.type==='Exploding Kitten');
       const defPool = full.filter(c=>c.type==='Defuse');
       let base = full.filter(c=>c.type!=='Exploding Kitten' && c.type!=='Defuse');
@@ -392,9 +458,7 @@
 
       for(const pid of ids){
         const hand = [];
-        // Give exactly 1 Defuse per player (use pool if available, else mint one)
         if(defPool.length>0) hand.push(defPool.pop()); else hand.push({id:id(), type:'Defuse'});
-        // Deal 4 starting cards from the non-EK / non-Defuse pool
         for(let i=0;i<4;i++){ if(base.length) hand.push(base.pop()); }
         players[pid].hand = hand;
       }
@@ -414,49 +478,44 @@
       log(ids.length<2 ? 'Solo game started (testing mode)' : 'Game started');
     }
 
-    
-
     // Draw action
     async function drawCard(){
       if(!isMyTurn()||room.awaitingNope||room.defusePrompt||room.stfPrompt) return;
+      await drawFor(me.id, 'top');
+    }
+
+    async function drawFor(pid, from){
       const deck=[...(room.deck||[])];
       if(deck.length===0) return toast('Deck empty');
-      const card = deck.pop();
-      const my = {...room.players[me.id]};
+      const card = (from==='bottom')? deck.shift() : deck.pop();
       const players={...room.players};
       const discard=[...(room.discard||[])];
+      const actor = {...players[pid]};
 
       if(card.type==='Exploding Kitten'){
-        const hasDefuse = my.hand.some(c=>c.type==='Defuse');
+        const hasDefuse = actor.hand.some(c=>c.type==='Defuse');
         if(!hasDefuse){
-          players[me.id].dead = true;
-          log(`${my.name} exploded! ☠️`);
-          const next = nextTurnAfter(me.id);
+          players[pid].dead = true;
+          log(`${actor.name} exploded! ☠️`);
+          const next = nextTurnAfter(pid);
           await update(ref(db,`ek/${room.id}`),{deck,players,discard,turn:next});
-          checkWin();
+          await checkWin();
           return;
         } else {
-          await update(ref(db,`ek/${room.id}`),{deck, defusePrompt:{pid:me.id, card}});
-          openDefuse();
+          await update(ref(db,`ek/${room.id}`),{deck, defusePrompt:{pid, card}});
+          if(pid===me.id) openDefuse();
           return;
         }
       }
 
-      my.hand = [...my.hand, card]; players[me.id]=my;
+      actor.hand = [...actor.hand, card]; players[pid]=actor;
       let pending = room.pendingAttacks||0;
       let newTurn = room.turn;
-      if(pending>0){ pending -= 1; }
-      else { newTurn = nextTurnAfter(me.id); }
+      if(pending>0){ pending -= 1; newTurn = pid; }
+      else { newTurn = nextTurnAfter(pid); }
 
       await update(ref(db,`ek/${room.id}`),{deck,players,discard,turn:newTurn,pendingAttacks:pending});
-      if(newTurn!==me.id) log(`${my.name} drew a card.`);
-    }
-
-    function nextTurnAfter(pid){
-      const order = seatingOrder();
-      const i = order.indexOf(pid);
-      const next = order[(i+1)%order.length];
-      return next;
+      if(newTurn!==pid) log(`${actor.name} drew a card${from==='bottom'?' (from bottom)':''}.`);
     }
 
     // Play a card from hand
@@ -481,10 +540,22 @@
           await update(ref(db,`ek/${room.id}`), {players, discard, awaitingNope: startNope(action), pendingAttacks: pending, turn});
           break;
         }
+        case 'Super Skip': {
+          const turn = nextTurnAfter(me.id);
+          await update(ref(db,`ek/${room.id}`), {players, discard, awaitingNope: startNope(action), pendingAttacks: 0, turn});
+          break;
+        }
         case 'Attack': {
           const pending = (room.pendingAttacks||0) + 2;
           const turn = nextTurnAfter(me.id);
           await update(ref(db,`ek/${room.id}`), {players, discard, awaitingNope: startNope(action), pendingAttacks: pending, turn});
+          break;
+        }
+        case 'Targeted Attack': {
+          const tgt = targetSel.value || nextTurnAfter(me.id);
+          action.target=tgt;
+          const pending = (room.pendingAttacks||0) + 2;
+          await update(ref(db,`ek/${room.id}`), {players, discard, awaitingNope: startNope(action), pendingAttacks: pending, turn: tgt});
           break;
         }
         case 'Favor': {
@@ -497,7 +568,23 @@
           await update(ref(db,`ek/${room.id}`), {players, discard, awaitingNope: startNope(action)});
           break;
         }
+        case 'Reverse': {
+          await update(ref(db,`ek/${room.id}`), {players, discard, awaitingNope: startNope(action)});
+          break;
+        }
+        case 'Draw From the Bottom': {
+          await update(ref(db,`ek/${room.id}`), {players, discard, awaitingNope: startNope(action)});
+          break;
+        }
         case 'See the Future': {
+          await update(ref(db,`ek/${room.id}`), {players, discard, awaitingNope: startNope(action)});
+          break;
+        }
+        case 'See the Future (5)': {
+          await update(ref(db,`ek/${room.id}`), {players, discard, awaitingNope: startNope(action)});
+          break;
+        }
+        case 'Alter the Future': {
           await update(ref(db,`ek/${room.id}`), {players, discard, awaitingNope: startNope(action)});
           break;
         }
@@ -537,17 +624,19 @@
 
     async function applyAction(action, canceled){
       const players={...room.players};
-      const deck=[...(room.deck||[])];
+      let deck=[...(room.deck||[])];
       const discard=[...(room.discard||[])];
-      let turn = room.turn; let pending = room.pendingAttacks||0;
+      let turn = room.turn; let pending = room.pendingAttacks||0; let direction = room.direction||1;
       if(canceled){ log(`Action ${action.type} was noped.`); await update(ref(db,`ek/${room.id}`), {awaitingNope:null}); return; }
 
       switch(action.type){
-        case 'Skip': {
+        case 'Skip':
+        case 'Attack': {
           await update(ref(db,`ek/${room.id}`), {players, deck, discard, awaitingNope:null, pendingAttacks: pending, turn});
           break;
         }
-        case 'Attack': {
+        case 'Super Skip': {
+          pending = 0; turn = nextTurnAfter(action.by);
           await update(ref(db,`ek/${room.id}`), {players, deck, discard, awaitingNope:null, pendingAttacks: pending, turn});
           break;
         }
@@ -570,10 +659,41 @@
           await update(ref(db,`ek/${room.id}`), {deck, awaitingNope:null});
           break;
         }
+        case 'Reverse': {
+          direction = -direction;
+          if(turn===action.by){
+            if(pending>0) pending -= 1;
+            turn = pending>0 ? action.by : nextTurnAfter(action.by, direction);
+          }
+          await update(ref(db,`ek/${room.id}`), {direction, awaitingNope:null, pendingAttacks: pending, turn});
+          break;
+        }
+        case 'Targeted Attack': {
+          // already set pending and turn on play
+          await update(ref(db,`ek/${room.id}`), {awaitingNope:null, pendingAttacks: pending, turn});
+          break;
+        }
+        case 'Draw From the Bottom': {
+          await update(ref(db,`ek/${room.id}`), {awaitingNope:null});
+          if(action.by===me.id){ await drawFor(action.by, 'bottom'); }
+          break;
+        }
         case 'See the Future': {
           const top3 = deck.slice(-3);
-          await update(ref(db,`ek/${room.id}`), {stfPrompt:{pid:action.by, top3}, awaitingNope:null});
-          if(me.id===action.by) openSTF(top3);
+          await update(ref(db,`ek/${room.id}`), {stfPrompt:{pid:action.by, topN:3, cards:top3, reorder:false}, awaitingNope:null});
+          if(me.id===action.by) openSTF(top3, false);
+          break;
+        }
+        case 'See the Future (5)': {
+          const top5 = deck.slice(-5);
+          await update(ref(db,`ek/${room.id}`), {stfPrompt:{pid:action.by, topN:5, cards:top5, reorder:false}, awaitingNope:null});
+          if(me.id===action.by) openSTF(top5, false);
+          break;
+        }
+        case 'Alter the Future': {
+          const top3 = deck.slice(-3);
+          await update(ref(db,`ek/${room.id}`), {stfPrompt:{pid:action.by, topN:3, cards:top3, reorder:true}, awaitingNope:null});
+          if(me.id===action.by) openSTF(top3, true);
           break;
         }
         default: {
@@ -583,23 +703,35 @@
     }
 
     // Modals — expose globally so inline onclick works under modules
-    function openSTF(){ $('#modalSTF').showModal(); renderSTF(); }
+    function openSTF(initial, canReorder){
+      stfLocal = {list:[...(initial||room?.stfPrompt?.cards||[])], reorder: !!canReorder};
+      const btn = document.getElementById('applySTFBtn');
+      if(btn) btn.style.display = stfLocal.reorder ? 'inline-flex' : 'none';
+      document.getElementById('modalSTF').showModal();
+      renderSTF();
+    }
     function renderSTF(){
       const m = room?.stfPrompt; if(!m||m.pid!==me?.id) return;
       const c = $('#stfCards'); c.innerHTML='';
-      (m.top3||[]).forEach(k=>{
+      (stfLocal?.list||m.cards||[]).forEach((k,idx)=>{
         const d=document.createElement('div'); d.className='ek-card'; d.setAttribute('type',k.type);
-        d.innerHTML = `<div class="title">${k.type}</div><div class="art">${cardEmoji(k.type)}</div>`;
+        const controls = stfLocal?.reorder ? `<div class="row" style="gap:6px;position:absolute;bottom:6px;left:6px;right:6px;justify-content:center">
+            <button style="padding:2px 6px" onclick="moveSTF(${idx},-1)">↑</button>
+            <button style="padding:2px 6px" onclick="moveSTF(${idx},1)">↓</button>
+          </div>` : '';
+        d.innerHTML = `<div class="title">${k.type}</div><div class="art">${cardEmoji(k.type)}</div>${controls}`;
         c.appendChild(d);
       });
     }
-    window.closeSTF = async function(){ $('#modalSTF').close(); await update(ref(db,`ek/${room.id}`), {stfPrompt:null}); };
+    window.moveSTF = function(i,dir){ if(!stfLocal?.reorder) return; const a=stfLocal.list; const j=i+dir; if(j<0||j>=a.length) return; [a[i],a[j]]=[a[j],a[i]]; renderSTF(); };
+    window.applySTF = async function(){ if(me.id!==room.stfPrompt?.pid||!stfLocal?.reorder) return; let deck=[...(room.deck||[])]; const n = stfLocal.list.length; deck.splice(deck.length-n, n, ...stfLocal.list); await update(ref(db,`ek/${room.id}`), {deck, stfPrompt:null}); document.getElementById('modalSTF').close(); };
+    window.closeSTF = async function(){ document.getElementById('modalSTF').close(); await update(ref(db,`ek/${room.id}`), {stfPrompt:null}); };
 
-    function openDefuse(){ if(me?.id===room?.defusePrompt?.pid) $('#modalDefuse').showModal(); }
+    function openDefuse(){ if(me?.id===room?.defusePrompt?.pid) document.getElementById('modalDefuse').showModal(); }
     window.resolveDefuse = async function(where){
-      $('#modalDefuse').close();
+      document.getElementById('modalDefuse').close();
       const defCardIndex = room.players[me.id].hand.findIndex(c=>c.type==='Defuse');
-      const players={...room.players}; const deck=[...(room.deck||[])];
+      const players={...room.players}; let deck=[...(room.deck||[])];
       if(where==='no' || defCardIndex===-1){
         players[me.id].dead=true; log(`${players[me.id].name} exploded! ☠️`);
       } else {
@@ -614,7 +746,7 @@
       }
       const next = players[me.id].dead ? nextTurnAfter(me.id) : room.turn;
       await update(ref(db,`ek/${room.id}`), {players, deck, defusePrompt:null, turn:next});
-      checkWin();
+      await checkWin();
     };
 
     async function checkWin(){
@@ -634,6 +766,9 @@
     nopeBtn.onclick         = ()=>handleNope();
     if(copyRoomBtn){ copyRoomBtn.onclick = async ()=>{ try{ await navigator.clipboard.writeText(room?.id || roomId || ''); toast('Room code copied'); }catch{ toast('Copy failed'); } } }
     if(copyLinkBtn){ copyLinkBtn.onclick = async ()=>{ try{ await navigator.clipboard.writeText(shareLinkInput?.value || ''); toast('Invite link copied'); }catch{ toast('Copy failed'); } } }
+    if(rulesBtn){ rulesBtn.onclick = ()=> document.getElementById('modalRules').showModal(); }
+    if(packImploding){ packImploding.onchange = ()=>{ if(isHost() && room?.phase==='lobby'){ update(ref(db,`ek/${room.id}`), {packs:{...room.packs, imploding: packImploding.checked}}); } } }
+    if(packStreaking){ packStreaking.onchange = ()=>{ if(isHost() && room?.phase==='lobby'){ update(ref(db,`ek/${room.id}`), {packs:{...room.packs, streaking: packStreaking.checked}}); } } }
 
     // Show lobby on load
     lobbyEl.style.display='block';
@@ -659,17 +794,19 @@
       console.log('[TEST] Provided databaseURL valid ->', VALID_DB_RE.test(cfg.databaseURL));
       cases.forEach(u=>console.log('[TEST] URL', u, '->', VALID_DB_RE.test(u)));
       for(let p=2;p<=5;p++){
-        const d = makeDeck(p);
+        const d = makeDeck(p, {});
         const count = t => d.filter(c=>c.type===t).length;
         console.log(`[TEST] p=${p} EK=${count('Exploding Kitten')} (expect ${Math.max(1,p-1)})`, 'DEFUSE=', count('Defuse'));
       }
+      // expansion smoke test
+      const d2 = makeDeck(4, {imploding:true, streaking:true});
+      console.log('[TEST] expansion deck extra cards ->', d2.length);
       console.log('[TEST] room code element exists ->', !!document.getElementById('lobbyRoomLabel'));
       console.log('[TEST] share link input exists ->', !!document.getElementById('shareLink'));
       console.log('[TEST] soloStart checkbox exists ->', !!document.getElementById('soloStart'));
-      // Ensure initial hands never contain EKs after startGame logic
       (function testNoEKInInitialHands(){
         for(let p=1;p<=5;p++){
-          const full = makeDeck(p);
+          const full = makeDeck(p, {});
           const ekPool = full.filter(c=>c.type==='Exploding Kitten');
           const defPool = full.filter(c=>c.type==='Defuse');
           let base = full.filter(c=>c.type!=='Exploding Kitten' && c.type!=='Defuse');
