@@ -103,7 +103,8 @@
               <button id="leaveBtn">Leave</button>
             </div>
             <div style="height:8px"></div>
-            <label><input type="checkbox" id="enableNope" checked/> Enable Nope</label>
+            <label style="display:block;margin-bottom:6px"><input type="checkbox" id="enableNope" checked/> Enable Nope</label>
+            <label style="display:block"><input type="checkbox" id="soloStart" checked/> Allow solo start (testing)</label>
           </div>
         </div>
       </div>
@@ -238,7 +239,7 @@
       add('Defuse', Math.max(0,6-playerCount));
       return deck;
     }
-    function shuffle(array){ for(let i=array.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[array[i],array[j]]=[array[j]],array[i]} return array; }
+    function shuffle(array){ for(let i=array.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[array[i], array[j]] = [array[j], array[i]]} return array; }
     function cardEmoji(t){
       switch(t){
         case 'Exploding Kitten': return '💥🐱'; case 'Defuse': return '🧯'; case 'Nope': return '🚫'; case 'Attack': return '⚔️';
@@ -252,7 +253,7 @@
       const inLobby = room.phase === 'lobby';
       lobbyEl.style.display = inLobby ? 'block' : 'none';
       gameEl.style.display = inLobby ? 'none' : 'block';
-      $('#startBtn').disabled = !(isHost() && (Object.keys(room.players||{}).length>=2));
+      $('#startBtn').disabled = !(isHost() && (Object.keys(room.players||{}).length>=2 || document.getElementById('soloStart')?.checked));
 
       roomLabel.textContent = room.id;
       youLabel.textContent = me?.name||'-';
@@ -373,10 +374,11 @@
     async function startGame(){
       if(!isHost()) return;
       const ids = seatingOrder();
-      if(ids.length<2) return toast('Need 2+ players');
-      let deck = makeDeck(ids.length);
+      const soloOK = document.getElementById('soloStart')?.checked;
+      if(ids.length<2 && !soloOK) return toast('Need 2+ players');
+      let deck = makeDeck(ids.length || 1);
       shuffle(deck);
-      const players = {...room.players};
+      const players = {...room.players};;
       for(const pid of ids){
         const hand = [];
         hand.push({id:id(), type:'Defuse'});
@@ -604,7 +606,7 @@
     $('#createBtn').onclick = ()=>createRoom().catch(e=>toast(e.message));
     $('#joinBtn').onclick   = ()=>joinRoom().catch(e=>toast(e.message));
     $('#leaveBtn').onclick  = ()=>leaveRoom();
-    $('#startBtn').onclick  = ()=>startGame();
+    $('#startBtn').onclick  = ()=>startGame().catch(e=>toast(e.message));
     drawBtn.onclick         = ()=>drawCard();
     nopeBtn.onclick         = ()=>handleNope();
     if(copyRoomBtn){ copyRoomBtn.onclick = async ()=>{ try{ await navigator.clipboard.writeText(room?.id || roomId || ''); toast('Room code copied'); }catch{ toast('Copy failed'); } } }
