@@ -376,22 +376,45 @@
       const ids = seatingOrder();
       const soloOK = document.getElementById('soloStart')?.checked;
       if(ids.length<2 && !soloOK) return toast('Need 2+ players');
-      let deck = makeDeck(ids.length || 1);
-      shuffle(deck);
-      const players = {...room.players};;
+
+      // Build a full deck, then follow official setup order:
+      // 1) Remove all Exploding Kittens
+      // 2) Remove all Defuse, deal 1 to each player, put extras back into deck
+      // 3) Deal starting hand (we use 4 extra cards here for our smaller deck)
+      // 4) Insert EKs = players-1 back into the deck and shuffle
+      const full = makeDeck(ids.length || 1);
+      const ekPool = full.filter(c=>c.type==='Exploding Kitten');
+      const defPool = full.filter(c=>c.type==='Defuse');
+      let base = full.filter(c=>c.type!=='Exploding Kitten' && c.type!=='Defuse');
+
+      shuffle(base);
+      const players = {...room.players};
+
       for(const pid of ids){
         const hand = [];
-        hand.push({id:id(), type:'Defuse'});
-        for(let i=0;i<4;i++){ hand.push(deck.pop()); }
+        // Give exactly 1 Defuse per player (use pool if available, else mint one)
+        if(defPool.length>0) hand.push(defPool.pop()); else hand.push({id:id(), type:'Defuse'});
+        // Deal 4 starting cards from the non-EK / non-Defuse pool
+        for(let i=0;i<4;i++){ if(base.length) hand.push(base.pop()); }
         players[pid].hand = hand;
       }
+
+      // Put any extra Defuse cards back into the deck
+      let deck = base.concat(defPool);
+
+      // Insert EKs back: players - 1 (minimum 1)
+      const needEK = Math.max(1, ids.length - 1);
+      deck.push(...ekPool.slice(0, needEK));
       shuffle(deck);
+
       await update(ref(db, `ek/${room.id}`), {
         phase:'playing', deck, discard:[], players, turn: ids[0], pendingAttacks:0,
         awaitingNope:null, defusePrompt:null, stfPrompt:null, enableNope: $('#enableNope').checked
       });
-      log('Game started');
+      log(ids.length<2 ? 'Solo game started (testing mode)' : 'Game started');
     }
+
+    
 
     // Draw action
     async function drawCard(){
@@ -642,6 +665,24 @@
       }
       console.log('[TEST] room code element exists ->', !!document.getElementById('lobbyRoomLabel'));
       console.log('[TEST] share link input exists ->', !!document.getElementById('shareLink'));
+      console.log('[TEST] soloStart checkbox exists ->', !!document.getElementById('soloStart'));
+      // Ensure initial hands never contain EKs after startGame logic
+      (function testNoEKInInitialHands(){
+        for(let p=1;p<=5;p++){
+          const full = makeDeck(p);
+          const ekPool = full.filter(c=>c.type==='Exploding Kitten');
+          const defPool = full.filter(c=>c.type==='Defuse');
+          let base = full.filter(c=>c.type!=='Exploding Kitten' && c.type!=='Defuse');
+          shuffle(base);
+          const hands = Array.from({length:p}, ()=>[]);
+          for(const h of hands){
+            if(defPool.length>0) h.push(defPool.pop()); else h.push({id:id(),type:'Defuse'});
+            for(let i=0;i<4;i++){ if(base.length) h.push(base.pop()); }
+          }
+          const anyEK = hands.some(h=>h.some(c=>c.type==='Exploding Kitten'));
+          console.log(`[TEST] p=${p} -> starting hands contain EK?`, anyEK);
+        }
+      })();
     })();
   </script>
 </body>
